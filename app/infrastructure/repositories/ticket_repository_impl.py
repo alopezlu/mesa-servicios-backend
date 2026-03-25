@@ -1,0 +1,206 @@
+from datetime import date, datetime, time, timezone
+
+from sqlalchemy import func, or_, select, text
+from sqlalchemy.orm import Session
+
+from app.domain.entities.enums import TicketStatus
+from app.domain.entities.ticket import Ticket
+from app.domain.repositories.ticket_repository import ITicketRepository
+from app.infrastructure.database.models import AnalystModel, TicketModel
+from app.infrastructure.mappers.ticket_mapper import apply_to_model, to_entity
+
+
+class TicketRepositoryImpl(ITicketRepository):
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def get_by_id(self, ticket_id: int) -> Ticket | None:
+        row = self._session.get(TicketModel, ticket_id)
+        return to_entity(row) if row else None
+
+    def list_all(self, skip: int = 0, limit: int = 100) -> list[Ticket]:
+        stmt = select(TicketModel).order_by(TicketModel.id.desc()).offset(skip).limit(limit)
+        rows = self._session.scalars(stmt).all()
+        return [to_entity(r) for r in rows]
+
+    def list_mesa_queue(self, skip: int = 0, limit: int = 100) -> list[Ticket]:
+        stmt = (
+            select(TicketModel)
+            .where(
+                ~TicketModel.status.in_(
+                    [
+                        TicketStatus.RESOLVED.value,
+                        TicketStatus.CLOSED.value,
+                    ]
+                )
+            )
+            .order_by(TicketModel.id.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        rows = self._session.scalars(stmt).all()
+        return [to_entity(r) for r in rows]
+
+    def list_historical(self, skip: int = 0, limit: int = 100) -> list[Ticket]:
+        stmt = (
+            select(TicketModel)
+            .where(
+                TicketModel.status.in_(
+                    [
+                        TicketStatus.RESOLVED.value,
+                        TicketStatus.CLOSED.value,
+                    ]
+                )
+            )
+            .order_by(TicketModel.id.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        rows = self._session.scalars(stmt).all()
+        return [to_entity(r) for r in rows]
+
+    def list_by_creator(self, user_id: int, skip: int = 0, limit: int = 100) -> list[Ticket]:
+        stmt = (
+            select(TicketModel)
+            .where(TicketModel.created_by_user_id == user_id)
+            .order_by(TicketModel.id.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        rows = self._session.scalars(stmt).all()
+        return [to_entity(r) for r in rows]
+
+    def list_by_assignee(
+        self,
+        analyst_id: int,
+        analyst_level: str,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> list[Ticket]:
+        stmt = (
+            select(TicketModel)
+            .where(
+                TicketModel.analyst_id == analyst_id,
+                TicketModel.analyst_level == analyst_level,
+            )
+            .order_by(TicketModel.id.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        rows = self._session.scalars(stmt).all()
+        return [to_entity(r) for r in rows]
+
+    def create(self, ticket: Ticket) -> Ticket:
+        row = TicketModel()
+        apply_to_model(ticket, row)
+        row.id = None
+        self._session.add(row)
+        self._session.flush()
+        self._session.refresh(row)
+        return to_entity(row)
+
+    def update(self, ticket: Ticket) -> Ticket:
+        row = self._session.get(TicketModel, ticket.id)
+        if not row:
+            raise ValueError("Ticket no encontrado")
+        apply_to_model(ticket, row)
+        self._session.flush()
+        self._session.refresh(row)
+        return to_entity(row)
+
+    def delete(self, ticket_id: int) -> bool:
+        row = self._session.get(TicketModel, ticket_id)
+        if not row:
+            return False
+        self._session.delete(row)
+        return True
+
+    def count_open_on_date(self, day: date) -> int:
+        end = datetime.combine(day, time(23, 59, 59, tzinfo=timezone.utc))
+        created_before = TicketModel.created_at <= end
+        not_closed_yet = or_(TicketModel.closed_at.is_(None), TicketModel.closed_at > end)
+        stmt = select(func.count()).select_from(TicketModel).where(created_before, not_closed_yet)
+        return int(self._session.scalar(stmt) or 0)
+
+    def reopened_stats(self) -> tuple[int, int]:
+        reopened = select(func.count()).select_from(TicketModel).where(TicketModel.reopened_count > 0)
+        total_resolved = select(func.count()).select_from(TicketModel).where(
+            TicketModel.status.in_(
+                [
+                    TicketStatus.RESOLVED.value,
+                    TicketStatus.CLOSED.value,
+                ]
+            )
+        )
+        r = int(self._session.scalar(reopened) or 0)
+        t = int(self._session.scalar(total_resolved) or 0)
+        return r, t
+
+    def resolved_by_analyst(self) -> list[tuple[str, int]]:
+        stmt = (
+            select(AnalystModel.name, func.count(TicketModel.id))
+            .join(TicketModel, TicketModel.analyst_id == AnalystModel.id)
+            .where(
+                TicketModel.status.in_(
+                    [
+                        TicketStatus.RESOLVED.value,
+                        TicketStatus.CLOSED.value,
+                    ]
+                )
+            )
+            .group_by(AnalystModel.name)
+            .order_by(func.count(TicketModel.id).desc())
+        )
+        return [(name, int(cnt)) for name, cnt in self._session.execute(stmt).all()]
+
+    def open_vs_closed_counts(self) -> tuple[int, int]:
+        closed_cnt = self._session.scalar(
+            select(func.count()).select_from(TicketModel).where(TicketModel.status == TicketStatus.CLOSED.value)
+        )
+        total = self._session.scalar(select(func.count()).select_from(TicketModel))
+        c = int(closed_cnt or 0)
+        t = int(total or 0)
+        return t - c, c
+
+    def count_open_not_closed(self) -> int:
+        n = self._session.scalar(
+            select(func.count()).select_from(TicketModel).where(TicketModel.status != TicketStatus.CLOSED.value)
+        )
+        return int(n or 0)
+
+    def counts_by_status(self) -> list[tuple[str, int]]:
+        stmt = select(TicketModel.status, func.count(TicketModel.id)).group_by(TicketModel.status)
+        return [(str(s), int(c)) for s, c in self._session.execute(stmt).all()]
+
+    def avg_resolution_hours(self) -> float | None:
+        sql = text(
+            """
+            SELECT AVG(TIMESTAMPDIFF(SECOND, created_at, COALESCE(resolved_at, closed_at))) / 3600.0
+            FROM tickets
+            WHERE resolved_at IS NOT NULL OR closed_at IS NOT NULL
+            """
+        )
+        v = self._session.execute(sql).scalar()
+        return float(v) if v is not None else None
+
+    def avg_seconds_metric_detection_to_first_response(self) -> float | None:
+        sql = text(
+            """
+            SELECT AVG(TIMESTAMPDIFF(SECOND, metric_detected_at, metric_first_response_at))
+            FROM tickets
+            WHERE metric_detected_at IS NOT NULL AND metric_first_response_at IS NOT NULL
+            """
+        )
+        v = self._session.execute(sql).scalar()
+        return float(v) if v is not None else None
+
+    def avg_seconds_metric_first_response_to_resolution(self) -> float | None:
+        sql = text(
+            """
+            SELECT AVG(TIMESTAMPDIFF(SECOND, metric_first_response_at, metric_resolution_at))
+            FROM tickets
+            WHERE metric_first_response_at IS NOT NULL AND metric_resolution_at IS NOT NULL
+            """
+        )
+        v = self._session.execute(sql).scalar()
+        return float(v) if v is not None else None
