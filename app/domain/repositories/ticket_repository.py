@@ -12,6 +12,7 @@ class ITicketRepository(ABC):
     def list_all(self, skip: int = 0, limit: int = 100) -> list[Ticket]: ...
 
     @abstractmethod
+<<<<<<< HEAD
     def list_mesa_queue(self, skip: int = 0, limit: int = 100) -> list[Ticket]: ...
 
     @abstractmethod
@@ -19,6 +20,53 @@ class ITicketRepository(ABC):
 
     @abstractmethod
     def list_by_creator(self, user_id: int, skip: int = 0, limit: int = 100) -> list[Ticket]: ...
+=======
+    def list_mesa_queue(
+        self,
+        skip: int = 0,
+        limit: int = 100,
+        *,
+        status: str | None = None,
+        search: str | None = None,
+    ) -> list[Ticket]: ...
+
+    @abstractmethod
+    def count_mesa_queue(self, *, status: str | None = None, search: str | None = None) -> int: ...
+
+    @abstractmethod
+    def list_historical(
+        self,
+        skip: int = 0,
+        limit: int = 100,
+        *,
+        status: str | None = None,
+        search: str | None = None,
+    ) -> list[Ticket]: ...
+
+    @abstractmethod
+    def count_historical(self, *, status: str | None = None, search: str | None = None) -> int: ...
+
+    @abstractmethod
+    def list_by_creator(
+        self,
+        user_id: int,
+        skip: int = 0,
+        limit: int = 100,
+        *,
+        status: str | None = None,
+        search: str | None = None,
+        resolved_first: bool = False,
+    ) -> list[Ticket]: ...
+
+    @abstractmethod
+    def count_by_creator(
+        self,
+        user_id: int,
+        *,
+        status: str | None = None,
+        search: str | None = None,
+    ) -> int: ...
+>>>>>>> 1b3ce0e (feat:mesa-backend): mi primer commit corregido backend completo con paginacion)
 
     @abstractmethod
     def list_by_assignee(
@@ -27,9 +75,28 @@ class ITicketRepository(ABC):
         analyst_level: str,
         skip: int = 0,
         limit: int = 100,
+<<<<<<< HEAD
     ) -> list[Ticket]: ...
 
     @abstractmethod
+=======
+        *,
+        status: str | None = None,
+        search: str | None = None,
+    ) -> list[Ticket]: ...
+
+    @abstractmethod
+    def count_by_assignee(
+        self,
+        analyst_id: int,
+        analyst_level: str,
+        *,
+        status: str | None = None,
+        search: str | None = None,
+    ) -> int: ...
+
+    @abstractmethod
+>>>>>>> 1b3ce0e (feat:mesa-backend): mi primer commit corregido backend completo con paginacion)
     def create(self, ticket: Ticket) -> Ticket: ...
 
     @abstractmethod

@@ -85,6 +85,18 @@ class TicketOut(BaseModel):
     sla: SLASnapshot
 
 
+<<<<<<< HEAD
+=======
+class TicketListPage(BaseModel):
+    """Listado paginado de tickets (mesa o usuario)."""
+
+    items: list[TicketOut]
+    total: int
+    skip: int
+    limit: int
+
+
+>>>>>>> 1b3ce0e (feat:mesa-backend): mi primer commit corregido backend completo con paginacion)
 class TicketCreateUser(BaseModel):
     """Alta de caso por usuario final (sin asignación ni niveles operativos)."""
 

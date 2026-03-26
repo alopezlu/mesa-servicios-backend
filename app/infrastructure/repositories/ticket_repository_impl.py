@@ -1,6 +1,10 @@
 from datetime import date, datetime, time, timezone
 
+<<<<<<< HEAD
 from sqlalchemy import func, literal, or_, select, text, update
+=======
+from sqlalchemy import and_, case, func, literal, or_, select, text, update
+>>>>>>> 1b3ce0e (feat:mesa-backend): mi primer commit corregido backend completo con paginacion)
 from sqlalchemy.orm import Session
 
 from app.domain.entities.enums import TicketStatus
@@ -10,6 +14,26 @@ from app.infrastructure.database.models import AnalystModel, TicketModel
 from app.infrastructure.mappers.ticket_mapper import apply_to_model, to_entity
 
 
+<<<<<<< HEAD
+=======
+def _ticket_text_search(search: str | None):
+    """Búsqueda por ID numérico, título, descripción o notas de traspaso."""
+    if not search or not (s := search.strip()):
+        return None
+    like = f"%{s}%"
+    parts = [
+        TicketModel.title.like(like),
+        TicketModel.description.like(like),
+        TicketModel.handover_notes.like(like),
+    ]
+    try:
+        parts.append(TicketModel.id == int(s))
+    except ValueError:
+        pass
+    return or_(*parts)
+
+
+>>>>>>> 1b3ce0e (feat:mesa-backend): mi primer commit corregido backend completo con paginacion)
 class TicketRepositoryImpl(ITicketRepository):
     def __init__(self, session: Session) -> None:
         self._session = session
@@ -23,6 +47,7 @@ class TicketRepositoryImpl(ITicketRepository):
         rows = self._session.scalars(stmt).all()
         return [to_entity(r) for r in rows]
 
+<<<<<<< HEAD
     def list_mesa_queue(self, skip: int = 0, limit: int = 100) -> list[Ticket]:
         stmt = (
             select(TicketModel)
@@ -34,6 +59,35 @@ class TicketRepositoryImpl(ITicketRepository):
                     ]
                 )
             )
+=======
+    def _mesa_base_where(self, *, status: str | None, search: str | None):
+        conds = [
+            ~TicketModel.status.in_(
+                [
+                    TicketStatus.RESOLVED.value,
+                    TicketStatus.CLOSED.value,
+                ]
+            )
+        ]
+        if status:
+            conds.append(TicketModel.status == status)
+        sc = _ticket_text_search(search)
+        if sc is not None:
+            conds.append(sc)
+        return and_(*conds) if len(conds) > 1 else conds[0]
+
+    def list_mesa_queue(
+        self,
+        skip: int = 0,
+        limit: int = 100,
+        *,
+        status: str | None = None,
+        search: str | None = None,
+    ) -> list[Ticket]:
+        stmt = (
+            select(TicketModel)
+            .where(self._mesa_base_where(status=status, search=search))
+>>>>>>> 1b3ce0e (feat:mesa-backend): mi primer commit corregido backend completo con paginacion)
             .order_by(TicketModel.id.desc())
             .offset(skip)
             .limit(limit)
@@ -41,6 +95,7 @@ class TicketRepositoryImpl(ITicketRepository):
         rows = self._session.scalars(stmt).all()
         return [to_entity(r) for r in rows]
 
+<<<<<<< HEAD
     def list_historical(self, skip: int = 0, limit: int = 100) -> list[Ticket]:
         stmt = (
             select(TicketModel)
@@ -52,6 +107,41 @@ class TicketRepositoryImpl(ITicketRepository):
                     ]
                 )
             )
+=======
+    def count_mesa_queue(self, *, status: str | None = None, search: str | None = None) -> int:
+        stmt = select(func.count()).select_from(TicketModel).where(
+            self._mesa_base_where(status=status, search=search)
+        )
+        return int(self._session.scalar(stmt) or 0)
+
+    def _historical_base_where(self, *, status: str | None, search: str | None):
+        conds = [
+            TicketModel.status.in_(
+                [
+                    TicketStatus.RESOLVED.value,
+                    TicketStatus.CLOSED.value,
+                ]
+            )
+        ]
+        if status:
+            conds.append(TicketModel.status == status)
+        sc = _ticket_text_search(search)
+        if sc is not None:
+            conds.append(sc)
+        return and_(*conds) if len(conds) > 1 else conds[0]
+
+    def list_historical(
+        self,
+        skip: int = 0,
+        limit: int = 100,
+        *,
+        status: str | None = None,
+        search: str | None = None,
+    ) -> list[Ticket]:
+        stmt = (
+            select(TicketModel)
+            .where(self._historical_base_where(status=status, search=search))
+>>>>>>> 1b3ce0e (feat:mesa-backend): mi primer commit corregido backend completo con paginacion)
             .order_by(TicketModel.id.desc())
             .offset(skip)
             .limit(limit)
@@ -59,32 +149,121 @@ class TicketRepositoryImpl(ITicketRepository):
         rows = self._session.scalars(stmt).all()
         return [to_entity(r) for r in rows]
 
+<<<<<<< HEAD
     def list_by_creator(self, user_id: int, skip: int = 0, limit: int = 100) -> list[Ticket]:
         stmt = (
             select(TicketModel)
             .where(TicketModel.created_by_user_id == user_id)
             .order_by(TicketModel.id.desc())
+=======
+    def count_historical(self, *, status: str | None = None, search: str | None = None) -> int:
+        stmt = select(func.count()).select_from(TicketModel).where(
+            self._historical_base_where(status=status, search=search)
+        )
+        return int(self._session.scalar(stmt) or 0)
+
+    def _by_creator_base(self, user_id: int, *, status: str | None, search: str | None):
+        conds = [TicketModel.created_by_user_id == user_id]
+        if status:
+            conds.append(TicketModel.status == status)
+        sc = _ticket_text_search(search)
+        if sc is not None:
+            conds.append(sc)
+        return and_(*conds)
+
+    def list_by_creator(
+        self,
+        user_id: int,
+        skip: int = 0,
+        limit: int = 100,
+        *,
+        status: str | None = None,
+        search: str | None = None,
+        resolved_first: bool = False,
+    ) -> list[Ticket]:
+        order = (
+            (
+                case((TicketModel.status == TicketStatus.RESOLVED.value, 0), else_=1),
+                TicketModel.id.desc(),
+            )
+            if resolved_first
+            else (TicketModel.id.desc(),)
+        )
+        stmt = (
+            select(TicketModel)
+            .where(self._by_creator_base(user_id, status=status, search=search))
+            .order_by(*order)
+>>>>>>> 1b3ce0e (feat:mesa-backend): mi primer commit corregido backend completo con paginacion)
             .offset(skip)
             .limit(limit)
         )
         rows = self._session.scalars(stmt).all()
         return [to_entity(r) for r in rows]
 
+<<<<<<< HEAD
+=======
+    def count_by_creator(
+        self,
+        user_id: int,
+        *,
+        status: str | None = None,
+        search: str | None = None,
+    ) -> int:
+        stmt = select(func.count()).select_from(TicketModel).where(
+            self._by_creator_base(user_id, status=status, search=search)
+        )
+        return int(self._session.scalar(stmt) or 0)
+
+    def _by_assignee_base(
+        self,
+        analyst_id: int,
+        analyst_level: str,
+        *,
+        status: str | None,
+        search: str | None,
+    ):
+        conds = [
+            TicketModel.analyst_level == analyst_level,
+            or_(
+                TicketModel.analyst_id == analyst_id,
+                TicketModel.analyst_id.is_(None),
+            ),
+        ]
+        if status:
+            conds.append(TicketModel.status == status)
+        sc = _ticket_text_search(search)
+        if sc is not None:
+            conds.append(sc)
+        return and_(*conds)
+
+>>>>>>> 1b3ce0e (feat:mesa-backend): mi primer commit corregido backend completo con paginacion)
     def list_by_assignee(
         self,
         analyst_id: int,
         analyst_level: str,
         skip: int = 0,
         limit: int = 100,
+<<<<<<< HEAD
+=======
+        *,
+        status: str | None = None,
+        search: str | None = None,
+>>>>>>> 1b3ce0e (feat:mesa-backend): mi primer commit corregido backend completo con paginacion)
     ) -> list[Ticket]:
         stmt = (
             select(TicketModel)
             .where(
+<<<<<<< HEAD
                 TicketModel.analyst_level == analyst_level,
                 or_(
                     TicketModel.analyst_id == analyst_id,
                     TicketModel.analyst_id.is_(None),
                 ),
+=======
+                self._by_assignee_base(
+                    analyst_id, analyst_level, status=status, search=search
+                )
+>>>>>>> 1b3ce0e (feat:mesa-backend): mi primer commit corregido backend completo con paginacion)
             )
             .order_by(TicketModel.id.desc())
             .offset(skip)
@@ -93,6 +272,22 @@ class TicketRepositoryImpl(ITicketRepository):
         rows = self._session.scalars(stmt).all()
         return [to_entity(r) for r in rows]
 
+<<<<<<< HEAD
+=======
+    def count_by_assignee(
+        self,
+        analyst_id: int,
+        analyst_level: str,
+        *,
+        status: str | None = None,
+        search: str | None = None,
+    ) -> int:
+        stmt = select(func.count()).select_from(TicketModel).where(
+            self._by_assignee_base(analyst_id, analyst_level, status=status, search=search)
+        )
+        return int(self._session.scalar(stmt) or 0)
+
+>>>>>>> 1b3ce0e (feat:mesa-backend): mi primer commit corregido backend completo con paginacion)
     def create(self, ticket: Ticket) -> Ticket:
         row = TicketModel()
         apply_to_model(ticket, row)
