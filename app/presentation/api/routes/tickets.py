@@ -11,10 +11,7 @@ from app.presentation.schemas.ticket_schemas import (
     RecategorizeBody,
     TicketAdjustSLABody,
     TicketCloseBody,
-<<<<<<< HEAD
-=======
     TicketListPage,
->>>>>>> 1b3ce0e (feat:mesa-backend): mi primer commit corregido backend completo con paginacion)
     TicketOut,
     TicketUpdate,
     TransferBody,
@@ -28,17 +25,10 @@ router = APIRouter(
 )
 
 
-<<<<<<< HEAD
-@router.get("", response_model=list[TicketOut])
-def list_tickets(
-    skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=500),
-=======
 @router.get("", response_model=TicketListPage)
 def list_tickets(
     skip: int = Query(0, ge=0),
     limit: int = Query(25, ge=1, le=500),
->>>>>>> 1b3ce0e (feat:mesa-backend): mi primer commit corregido backend completo con paginacion)
     assigned_to_me: bool = Query(
         False,
         description="Si es true, solo tickets asignados al analista autenticado (evita colisión de rutas con /{ticket_id}).",
@@ -47,23 +37,6 @@ def list_tickets(
         False,
         description="Si es true, solo tickets resueltos o cerrados (no aplica junto con assigned_to_me).",
     ),
-<<<<<<< HEAD
-    analyst: Analyst = Depends(get_current_analyst),
-    session: Session = Depends(get_session),
-    svc: TicketApplicationService = Depends(get_ticket_application_service),
-) -> list[TicketOut]:
-    if assigned_to_me:
-        if analyst.id is None:
-            raise HTTPException(401, "Sesión inválida")
-        rows = svc.list_tickets_assigned_to_analyst(
-            analyst.id, analyst.level, skip=skip, limit=limit
-        )
-    elif historicos:
-        rows = svc.list_tickets_historical(skip=skip, limit=limit)
-    else:
-        rows = svc.list_tickets(skip=skip, limit=limit)
-    return tickets_with_sla_to_out(session, rows)
-=======
     status: str | None = Query(None, description="Filtrar por estado del ticket"),
     q: str | None = Query(None, description="Buscar en título o por ID numérico"),
     analyst: Analyst = Depends(get_current_analyst),
@@ -99,7 +72,6 @@ def list_tickets(
         )
     items = tickets_with_sla_to_out(session, rows)
     return TicketListPage(items=items, total=total, skip=skip, limit=limit)
->>>>>>> 1b3ce0e (feat:mesa-backend): mi primer commit corregido backend completo con paginacion)
 
 
 @router.get("/{ticket_id}", response_model=TicketOut)

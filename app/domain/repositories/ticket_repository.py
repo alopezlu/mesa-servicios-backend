@@ -12,15 +12,6 @@ class ITicketRepository(ABC):
     def list_all(self, skip: int = 0, limit: int = 100) -> list[Ticket]: ...
 
     @abstractmethod
-<<<<<<< HEAD
-    def list_mesa_queue(self, skip: int = 0, limit: int = 100) -> list[Ticket]: ...
-
-    @abstractmethod
-    def list_historical(self, skip: int = 0, limit: int = 100) -> list[Ticket]: ...
-
-    @abstractmethod
-    def list_by_creator(self, user_id: int, skip: int = 0, limit: int = 100) -> list[Ticket]: ...
-=======
     def list_mesa_queue(
         self,
         skip: int = 0,
@@ -66,7 +57,6 @@ class ITicketRepository(ABC):
         status: str | None = None,
         search: str | None = None,
     ) -> int: ...
->>>>>>> 1b3ce0e (feat:mesa-backend): mi primer commit corregido backend completo con paginacion)
 
     @abstractmethod
     def list_by_assignee(
@@ -75,11 +65,6 @@ class ITicketRepository(ABC):
         analyst_level: str,
         skip: int = 0,
         limit: int = 100,
-<<<<<<< HEAD
-    ) -> list[Ticket]: ...
-
-    @abstractmethod
-=======
         *,
         status: str | None = None,
         search: str | None = None,
@@ -96,7 +81,6 @@ class ITicketRepository(ABC):
     ) -> int: ...
 
     @abstractmethod
->>>>>>> 1b3ce0e (feat:mesa-backend): mi primer commit corregido backend completo con paginacion)
     def create(self, ticket: Ticket) -> Ticket: ...
 
     @abstractmethod

@@ -7,10 +7,7 @@ from app.domain.entities.enums import Priority, TicketType
 from app.domain.entities.user import User
 from app.presentation.schemas.ticket_schemas import (
     TicketCreateUser,
-<<<<<<< HEAD
-=======
     TicketListPage,
->>>>>>> 1b3ce0e (feat:mesa-backend): mi primer commit corregido backend completo con paginacion)
     TicketOut,
     UserConfirmCloseBody,
     UserSatisfactionBody,
@@ -20,20 +17,6 @@ from app.presentation.ticket_enrichment import one_ticket_to_out, tickets_with_s
 router = APIRouter(prefix="/user/tickets", tags=["user-tickets"])
 
 
-<<<<<<< HEAD
-@router.get("", response_model=list[TicketOut])
-def list_my_tickets(
-    skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=500),
-    user: User = Depends(get_current_end_user),
-    session: Session = Depends(get_session),
-    svc: TicketApplicationService = Depends(get_ticket_application_service),
-) -> list[TicketOut]:
-    svc.auto_close_stale_resolved()
-    session.commit()
-    rows = svc.list_tickets_for_user(user.id, skip=skip, limit=limit)
-    return tickets_with_sla_to_out(session, rows)
-=======
 @router.get("", response_model=TicketListPage)
 def list_my_tickets(
     skip: int = Query(0, ge=0),
@@ -56,7 +39,6 @@ def list_my_tickets(
     )
     items = tickets_with_sla_to_out(session, rows)
     return TicketListPage(items=items, total=total, skip=skip, limit=limit)
->>>>>>> 1b3ce0e (feat:mesa-backend): mi primer commit corregido backend completo con paginacion)
 
 
 @router.post("", response_model=TicketOut, status_code=201)

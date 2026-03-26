@@ -61,20 +61,6 @@ class TicketApplicationService:
             "breached": breached,
         }
 
-<<<<<<< HEAD
-    def list_tickets(self, skip: int = 0, limit: int = 100) -> list[tuple[Ticket, dict]]:
-        items = self._tickets.list_mesa_queue(skip=skip, limit=limit)
-        return [(t, self.get_sla_computed(t)) for t in items]
-
-    def list_tickets_historical(self, skip: int = 0, limit: int = 100) -> list[tuple[Ticket, dict]]:
-        items = self._tickets.list_historical(skip=skip, limit=limit)
-        return [(t, self.get_sla_computed(t)) for t in items]
-
-    def list_tickets_for_user(self, user_id: int, skip: int = 0, limit: int = 100) -> list[tuple[Ticket, dict]]:
-        items = self._tickets.list_by_creator(user_id, skip=skip, limit=limit)
-        return [(t, self.get_sla_computed(t)) for t in items]
-
-=======
     def list_tickets(
         self,
         skip: int = 0,
@@ -139,21 +125,12 @@ class TicketApplicationService:
             user_id, status=status, search=search
         )
 
->>>>>>> 1b3ce0e (feat:mesa-backend): mi primer commit corregido backend completo con paginacion)
     def list_tickets_assigned_to_analyst(
         self,
         analyst_id: int,
         analyst_level: AnalystLevel,
         skip: int = 0,
         limit: int = 100,
-<<<<<<< HEAD
-    ) -> list[tuple[Ticket, dict]]:
-        items = self._tickets.list_by_assignee(
-            analyst_id, analyst_level.value, skip=skip, limit=limit
-        )
-        return [(t, self.get_sla_computed(t)) for t in items]
-
-=======
         *,
         status: str | None = None,
         search: str | None = None,
@@ -183,7 +160,6 @@ class TicketApplicationService:
             search=search,
         )
 
->>>>>>> 1b3ce0e (feat:mesa-backend): mi primer commit corregido backend completo con paginacion)
     def get_ticket(self, ticket_id: int) -> tuple[Ticket, dict] | None:
         t = self._tickets.get_by_id(ticket_id)
         if not t:
