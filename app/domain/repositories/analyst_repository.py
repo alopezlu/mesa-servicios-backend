@@ -1,9 +1,13 @@
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 
 from app.domain.entities.analyst import Analyst
 
 
 class IAnalystRepository(ABC):
+    @abstractmethod
+    def get_names_by_ids(self, analyst_ids: Iterable[int]) -> dict[int, str]: ...
+
     @abstractmethod
     def get_by_id(self, analyst_id: int) -> Analyst | None: ...
 

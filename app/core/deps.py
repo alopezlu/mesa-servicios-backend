@@ -16,6 +16,7 @@ from app.infrastructure.repositories.admin_repository_impl import AdminRepositor
 from app.infrastructure.repositories.analyst_repository_impl import AnalystRepositoryImpl
 from app.infrastructure.repositories.category_repository_impl import CategoryRepositoryImpl
 from app.infrastructure.repositories.notification_repository_impl import NotificationRepositoryImpl
+from app.infrastructure.repositories.satisfaction_repository_impl import SatisfactionRepositoryImpl
 from app.infrastructure.repositories.sla_policy_repository_impl import SLAPolicyRepositoryImpl
 from app.infrastructure.repositories.ticket_repository_impl import TicketRepositoryImpl
 from app.infrastructure.repositories.user_repository_impl import UserRepositoryImpl
@@ -104,11 +105,15 @@ def get_ticket_application_service(session: Session = Depends(get_session)) -> T
         CategoryRepositoryImpl(session),
         SLAPolicyRepositoryImpl(session),
         UserRepositoryImpl(session),
+        SatisfactionRepositoryImpl(session),
     )
 
 
 def get_analytics_application_service(session: Session = Depends(get_session)) -> AnalyticsApplicationService:
-    return AnalyticsApplicationService(TicketRepositoryImpl(session))
+    return AnalyticsApplicationService(
+        TicketRepositoryImpl(session),
+        SatisfactionRepositoryImpl(session),
+    )
 
 
 def get_sla_notification_application_service(

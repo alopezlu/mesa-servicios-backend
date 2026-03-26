@@ -1,3 +1,5 @@
+from collections.abc import Iterable
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -19,6 +21,13 @@ def _to_user(row: UserModel) -> User:
 class UserRepositoryImpl(IUserRepository):
     def __init__(self, session: Session) -> None:
         self._session = session
+
+    def get_full_names_by_ids(self, user_ids: Iterable[int]) -> dict[int, str]:
+        ids = {int(i) for i in user_ids}
+        if not ids:
+            return {}
+        stmt = select(UserModel.id, UserModel.full_name).where(UserModel.id.in_(ids))
+        return {int(r[0]): str(r[1]) for r in self._session.execute(stmt).all()}
 
     def get_by_id(self, user_id: int) -> User | None:
         row = self._session.get(UserModel, user_id)

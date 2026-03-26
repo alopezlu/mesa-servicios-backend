@@ -28,6 +28,8 @@ def to_entity(row: TicketModel) -> Ticket:
         metric_detected_at=getattr(row, "metric_detected_at", None),
         metric_first_response_at=getattr(row, "metric_first_response_at", None),
         metric_resolution_at=getattr(row, "metric_resolution_at", None),
+        handover_notes=getattr(row, "handover_notes", None),
+        user_agreement_to_close=getattr(row, "user_agreement_to_close", None),
     )
 
 
@@ -51,4 +53,6 @@ def apply_to_model(entity: Ticket, row: TicketModel) -> TicketModel:
     row.metric_detected_at = entity.metric_detected_at
     row.metric_first_response_at = entity.metric_first_response_at
     row.metric_resolution_at = entity.metric_resolution_at
+    row.handover_notes = entity.handover_notes
+    row.user_agreement_to_close = entity.user_agreement_to_close
     return row

@@ -1,10 +1,11 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.domain.entities.enums import AnalystLevel, Priority, TicketStatus, TicketType
 from app.domain.entities.ticket import Ticket
 from app.domain.repositories.analyst_repository import IAnalystRepository
 from app.domain.repositories.category_repository import ICategoryRepository
 from app.domain.repositories.sla_policy_repository import ISLAPolicyRepository
+from app.domain.repositories.satisfaction_repository import ISatisfactionRepository
 from app.domain.repositories.ticket_repository import ITicketRepository
 from app.domain.repositories.user_repository import IUserRepository
 from app.domain.services.sla_service import compute_sla_due_at, is_breached, sla_state
@@ -24,12 +25,14 @@ class TicketApplicationService:
         categories: ICategoryRepository,
         sla_policies: ISLAPolicyRepository,
         users: IUserRepository,
+        satisfaction: ISatisfactionRepository,
     ) -> None:
         self._tickets = tickets
         self._analysts = analysts
         self._categories = categories
         self._sla_policies = sla_policies
         self._users = users
+        self._satisfaction = satisfaction
 
     def _policy_hours(self) -> dict[Priority, int]:
         return self._sla_policies.get_hours_by_priority()
@@ -96,11 +99,11 @@ class TicketApplicationService:
         description: str,
         ticket_type: TicketType,
         priority: Priority,
-        category_id: int | None = None,
+        category_id: int,
     ) -> tuple[Ticket, dict]:
         if not self._users.get_by_id(created_by_user_id):
             raise ValueError("Usuario no existe")
-        if category_id is not None and not self._categories.get_by_id(category_id):
+        if not self._categories.get_by_id(category_id):
             raise ValueError("Categoría no existe")
         now = self._now()
         policy = self._policy_hours()
@@ -154,14 +157,15 @@ class TicketApplicationService:
                 base = base.replace(tzinfo=timezone.utc)
             t.sla_due_at = compute_sla_due_at(base, t.priority, self._policy_hours())
         if status is not None:
+            if status == TicketStatus.RESOLVED:
+                raise ValueError(
+                    "Para pasar a resuelto use el cierre formal (POST .../close) con causa raíz, acciones correctivas, "
+                    "registro de solución y métricas de tiempo."
+                )
             now = self._now()
             if status == TicketStatus.IN_PROGRESS:
                 if t.metric_first_response_at is None:
                     t.metric_first_response_at = now
-            if status == TicketStatus.RESOLVED:
-                t.resolved_at = now
-                if t.metric_resolution_at is None:
-                    t.metric_resolution_at = now
             if status == TicketStatus.REOPENED:
                 t.reopened_count = t.reopened_count + 1
                 t.resolved_at = None
@@ -186,6 +190,8 @@ class TicketApplicationService:
             raise ValueError("Ticket no encontrado")
         if t.status == TicketStatus.CLOSED:
             raise ValueError("El caso ya está cerrado")
+        if t.status == TicketStatus.RESOLVED:
+            raise ValueError("El caso ya está resuelto; pendiente de confirmación del usuario o cierre automático")
         d = _ensure_utc(metric_detected_at)
         f = _ensure_utc(metric_first_response_at)
         r = _ensure_utc(metric_resolution_at)
@@ -201,10 +207,61 @@ class TicketApplicationService:
         t.metric_resolution_at = r
         now = self._now()
         t.resolved_at = t.resolved_at or r
-        t.closed_at = now
-        t.status = TicketStatus.CLOSED
+        t.closed_at = None
+        t.status = TicketStatus.RESOLVED
         saved = self._tickets.update(t)
         return saved, self.get_sla_computed(saved)
+
+    def confirm_close_by_user(
+        self, ticket_id: int, user_id: int, *, user_agreement_statement: str
+    ) -> tuple[Ticket, dict]:
+        t = self._tickets.get_by_id(ticket_id)
+        if not t or t.created_by_user_id != user_id:
+            raise ValueError("Ticket no encontrado")
+        if t.status != TicketStatus.RESOLVED:
+            raise ValueError("Solo puede confirmar el cierre cuando el caso está en estado resuelto")
+        agreed = user_agreement_statement.strip()
+        if len(agreed) < 20:
+            raise ValueError(
+                "Debe indicar con sus palabras que está de acuerdo con cerrar el caso (mínimo 20 caracteres)."
+            )
+        now = self._now()
+        t.user_agreement_to_close = agreed
+        t.status = TicketStatus.CLOSED
+        t.closed_at = now
+        saved = self._tickets.update(t)
+        return saved, self.get_sla_computed(saved)
+
+    def submit_ticket_satisfaction(
+        self,
+        ticket_id: int,
+        user_id: int,
+        *,
+        rating: int,
+        comment: str | None,
+    ) -> None:
+        t = self._tickets.get_by_id(ticket_id)
+        if not t or t.created_by_user_id != user_id:
+            raise ValueError("Ticket no encontrado")
+        if t.status != TicketStatus.CLOSED:
+            raise ValueError("Solo puede enviar la encuesta cuando el caso está cerrado")
+        if ticket_id in self._satisfaction.ticket_ids_with_survey([ticket_id]):
+            raise ValueError("Ya envió la encuesta de satisfacción para este caso")
+        c = comment.strip() if comment else None
+        if c == "":
+            c = None
+        self._satisfaction.create(
+            ticket_id=ticket_id,
+            user_id=user_id,
+            rating=rating,
+            comment=c,
+        )
+
+    def auto_close_stale_resolved(self, *, hours: float = 1.0) -> int:
+        """Pasa a cerrado los resueltos hace más de `hours` sin confirmación del usuario."""
+        now = self._now()
+        cutoff = now - timedelta(hours=hours)
+        return self._tickets.bulk_close_resolved_stale(resolved_before=cutoff, closed_at=now)
 
     def convert_ticket_type(self, ticket_id: int, new_type: TicketType) -> tuple[Ticket, dict]:
         t = self._tickets.get_by_id(ticket_id)
@@ -214,11 +271,28 @@ class TicketApplicationService:
         saved = self._tickets.update(t)
         return saved, self.get_sla_computed(saved)
 
-    def escalate(self, ticket_id: int, target_level: AnalystLevel) -> tuple[Ticket, dict]:
+    def escalate_with_handover(
+        self,
+        ticket_id: int,
+        *,
+        actor_analyst_id: int,
+        target_level: AnalystLevel,
+        assignee_analyst_id: int,
+        handover_notes: str,
+        new_status: TicketStatus,
+    ) -> tuple[Ticket, dict]:
+        if new_status in (TicketStatus.RESOLVED, TicketStatus.CLOSED):
+            raise ValueError("Al escalar use estado abierto, en curso o reabierto (no resuelto ni cerrado)")
         order = [AnalystLevel.L1, AnalystLevel.L2, AnalystLevel.L3]
         t = self._tickets.get_by_id(ticket_id)
         if not t:
             raise ValueError("Ticket no encontrado")
+        if t.status == TicketStatus.CLOSED:
+            raise ValueError("El caso ya está cerrado")
+        if t.status == TicketStatus.RESOLVED:
+            raise ValueError("No se puede escalar un caso resuelto (pendiente de confirmación del usuario)")
+        if t.analyst_id != actor_analyst_id:
+            raise ValueError("Solo el analista asignado puede escalar; asígnese el caso si está sin asignar")
         current_idx = order.index(t.analyst_level)
         target_idx = order.index(target_level)
         if target_idx < current_idx:
@@ -228,9 +302,34 @@ class TicketApplicationService:
                 "Solo puede escalar un nivel a la vez: primero L1 atiende, si no puede pasa a L2, luego a L3"
             )
         if target_idx == current_idx:
-            return t, self.get_sla_computed(t)
+            raise ValueError("El caso ya está en ese nivel")
+        assignee = self._analysts.get_by_id(assignee_analyst_id)
+        if not assignee:
+            raise ValueError("Analista asignado no existe")
+        if not assignee.is_active:
+            raise ValueError("El analista destino está desactivado")
+        if assignee.level != target_level:
+            raise ValueError(
+                f"El analista destino debe ser de nivel {target_level.value} "
+                f"(recibió nivel {assignee.level.value})"
+            )
+        if t.created_by_user_id is not None:
+            creator = self._users.get_by_id(t.created_by_user_id)
+            if creator and creator.email.strip().lower() == assignee.email.strip().lower():
+                raise ValueError("El analista asignado no puede ser la misma persona que abrió el caso")
+
         t.analyst_level = target_level
-        t.analyst_id = None
+        t.analyst_id = assignee_analyst_id
+        t.handover_notes = handover_notes.strip()
+        now = self._now()
+        if new_status == TicketStatus.IN_PROGRESS:
+            if t.metric_first_response_at is None:
+                t.metric_first_response_at = now
+        if new_status == TicketStatus.REOPENED:
+            t.reopened_count = t.reopened_count + 1
+            t.resolved_at = None
+            t.closed_at = None
+        t.status = new_status
         saved = self._tickets.update(t)
         return saved, self.get_sla_computed(saved)
 
@@ -266,6 +365,28 @@ class TicketApplicationService:
         if category_id is not None and not self._categories.get_by_id(category_id):
             raise ValueError("Categoría no existe")
         t.category_id = category_id
+        saved = self._tickets.update(t)
+        return saved, self.get_sla_computed(saved)
+
+    def adjust_sla_due_at_by_assignee(
+        self,
+        ticket_id: int,
+        analyst_id: int,
+        *,
+        sla_due_at: datetime,
+    ) -> tuple[Ticket, dict]:
+        t = self._tickets.get_by_id(ticket_id)
+        if not t:
+            raise ValueError("Ticket no encontrado")
+        if t.analyst_id != analyst_id:
+            raise ValueError("Solo el analista asignado al caso puede ajustar el SLA")
+        if t.status in (TicketStatus.CLOSED, TicketStatus.RESOLVED):
+            raise ValueError("No se puede modificar el SLA de un caso resuelto o cerrado")
+        due = _ensure_utc(sla_due_at)
+        if t.created_at and due < _ensure_utc(t.created_at):
+            raise ValueError("La fecha límite del SLA no puede ser anterior a la creación del ticket")
+        t.sla_due_at = due
+        t.updated_at = self._now()
         saved = self._tickets.update(t)
         return saved, self.get_sla_computed(saved)
 

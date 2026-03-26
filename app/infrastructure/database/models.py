@@ -88,10 +88,23 @@ class TicketModel(Base):
     metric_detected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     metric_first_response_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     metric_resolution_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    handover_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    user_agreement_to_close: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     analyst: Mapped["AnalystModel | None"] = relationship(back_populates="tickets")
     category: Mapped["ServiceCategoryModel | None"] = relationship(back_populates="tickets")
     creator: Mapped["UserModel | None"] = relationship(back_populates="tickets_created")
+
+
+class TicketSatisfactionModel(Base):
+    __tablename__ = "ticket_satisfaction_surveys"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ticket_id: Mapped[int] = mapped_column(ForeignKey("tickets.id", ondelete="CASCADE"), unique=True, nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    rating: Mapped[int] = mapped_column(Integer, nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class SLANotificationModel(Base):

@@ -1,3 +1,5 @@
+from collections.abc import Iterable
+
 from sqlalchemy import func as sa_func, select
 from sqlalchemy.orm import Session
 
@@ -21,6 +23,13 @@ def _to_analyst(row: AnalystModel, *, include_secret: bool = False) -> Analyst:
 class AnalystRepositoryImpl(IAnalystRepository):
     def __init__(self, session: Session) -> None:
         self._session = session
+
+    def get_names_by_ids(self, analyst_ids: Iterable[int]) -> dict[int, str]:
+        ids = {int(i) for i in analyst_ids}
+        if not ids:
+            return {}
+        stmt = select(AnalystModel.id, AnalystModel.name).where(AnalystModel.id.in_(ids))
+        return {int(r[0]): str(r[1]) for r in self._session.execute(stmt).all()}
 
     def get_by_id(self, analyst_id: int) -> Analyst | None:
         row = self._session.get(AnalystModel, analyst_id)

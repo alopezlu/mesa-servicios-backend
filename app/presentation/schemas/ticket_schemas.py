@@ -20,11 +20,10 @@ class TicketStatusStr(str, Enum):
 
 
 class TicketStatusPatchStr(str, Enum):
-    """PATCH de estado: el cierre formal va por POST /tickets/{id}/close."""
+    """PATCH de estado: resolución solo vía POST /tickets/{id}/close (ITSM)."""
 
     open = "open"
     in_progress = "in_progress"
-    resolved = "resolved"
     reopened = "reopened"
 
 
@@ -39,6 +38,14 @@ class AnalystLevelStr(str, Enum):
     L1 = "L1"
     L2 = "L2"
     L3 = "L3"
+
+
+class EscalateStatusStr(str, Enum):
+    """Estado del ticket tras escalar (no resuelto ni cerrado aquí)."""
+
+    open = "open"
+    in_progress = "in_progress"
+    reopened = "reopened"
 
 
 class SLASnapshot(BaseModel):
@@ -57,8 +64,10 @@ class TicketOut(BaseModel):
     priority: str
     analyst_level: str
     analyst_id: int | None
+    analyst_name: str | None = None
     category_id: int | None
     created_by_user_id: int | None
+    created_by_name: str | None = None
     reopened_count: int
     created_at: datetime | None
     updated_at: datetime | None
@@ -70,6 +79,9 @@ class TicketOut(BaseModel):
     metric_detected_at: datetime | None = None
     metric_first_response_at: datetime | None = None
     metric_resolution_at: datetime | None = None
+    handover_notes: str | None = None
+    user_agreement_to_close: str | None = None
+    satisfaction_submitted: bool = False
     sla: SLASnapshot
 
 
@@ -80,7 +92,7 @@ class TicketCreateUser(BaseModel):
     description: str
     ticket_type: TicketTypeStr
     priority: PriorityStr
-    category_id: int | None = None
+    category_id: int = Field(gt=0, description="Categoría de servicio (obligatoria).")
 
 
 class TicketUpdate(BaseModel):
@@ -88,6 +100,10 @@ class TicketUpdate(BaseModel):
     description: str | None = None
     status: TicketStatusPatchStr | None = None
     priority: PriorityStr | None = None
+
+
+class TicketAdjustSLABody(BaseModel):
+    sla_due_at: datetime = Field(description="Nueva fecha y hora límite del SLA para el caso.")
 
 
 class TicketCloseBody(BaseModel):
@@ -101,14 +117,33 @@ class TicketCloseBody(BaseModel):
     )
     user_closure_confirmation: str = Field(
         min_length=20,
-        description="Evidencia de que el usuario final verificó y acepta el cierre.",
+        description="Descripción de la verificación o evidencia esperada del usuario (el cierre operativo lo confirma el usuario en el portal).",
     )
     metric_detected_at: datetime
     metric_first_response_at: datetime
     metric_resolution_at: datetime
 
 
-def ticket_to_out(ticket: Ticket, sla: dict) -> TicketOut:
+class UserConfirmCloseBody(BaseModel):
+    user_agreement_statement: str = Field(
+        min_length=20,
+        description="Texto en que el usuario declara estar conforme y autorizar el cierre del caso.",
+    )
+
+
+class UserSatisfactionBody(BaseModel):
+    rating: int = Field(ge=1, le=5, description="1 muy insatisfecho … 5 muy satisfecho")
+    comment: str | None = Field(default=None, max_length=2000)
+
+
+def ticket_to_out(
+    ticket: Ticket,
+    sla: dict,
+    *,
+    analyst_name: str | None = None,
+    created_by_name: str | None = None,
+    satisfaction_submitted: bool = False,
+) -> TicketOut:
     if ticket.id is None:
         raise ValueError("Ticket sin id")
     return TicketOut(
@@ -120,8 +155,10 @@ def ticket_to_out(ticket: Ticket, sla: dict) -> TicketOut:
         priority=ticket.priority.value,
         analyst_level=ticket.analyst_level.value,
         analyst_id=ticket.analyst_id,
+        analyst_name=analyst_name,
         category_id=ticket.category_id,
         created_by_user_id=ticket.created_by_user_id,
+        created_by_name=created_by_name,
         reopened_count=ticket.reopened_count,
         created_at=ticket.created_at,
         updated_at=ticket.updated_at,
@@ -133,6 +170,9 @@ def ticket_to_out(ticket: Ticket, sla: dict) -> TicketOut:
         metric_detected_at=ticket.metric_detected_at,
         metric_first_response_at=ticket.metric_first_response_at,
         metric_resolution_at=ticket.metric_resolution_at,
+        handover_notes=ticket.handover_notes,
+        user_agreement_to_close=ticket.user_agreement_to_close,
+        satisfaction_submitted=satisfaction_submitted,
         sla=SLASnapshot(
             sla_due_at=sla.get("sla_due_at"),
             state=sla["state"],
@@ -146,8 +186,14 @@ class ConvertTypeBody(BaseModel):
     ticket_type: TicketTypeStr
 
 
-class EscalateBody(BaseModel):
+class EscalateHandoverBody(BaseModel):
     target_level: AnalystLevelStr
+    assignee_analyst_id: int = Field(gt=0, description="Analista del nivel destino que recibirá el caso.")
+    handover_notes: str = Field(
+        min_length=20,
+        description="Qué se intentó, por qué no se cerró en este nivel y qué debe saber el siguiente analista.",
+    )
+    status: EscalateStatusStr
 
 
 class TransferBody(BaseModel):

@@ -1,19 +1,21 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session
 
 from app.application.services.ticket_application_service import TicketApplicationService
-from app.core.deps import get_current_analyst, get_ticket_application_service
+from app.core.deps import get_current_analyst, get_session, get_ticket_application_service
 from app.domain.entities.analyst import Analyst
 from app.domain.entities.enums import AnalystLevel, Priority, TicketStatus, TicketType
 from app.presentation.schemas.ticket_schemas import (
     ConvertTypeBody,
-    EscalateBody,
+    EscalateHandoverBody,
     RecategorizeBody,
+    TicketAdjustSLABody,
     TicketCloseBody,
     TicketOut,
     TicketUpdate,
     TransferBody,
-    ticket_to_out,
 )
+from app.presentation.ticket_enrichment import one_ticket_to_out, tickets_with_sla_to_out
 
 router = APIRouter(
     prefix="/tickets",
@@ -35,6 +37,7 @@ def list_tickets(
         description="Si es true, solo tickets resueltos o cerrados (no aplica junto con assigned_to_me).",
     ),
     analyst: Analyst = Depends(get_current_analyst),
+    session: Session = Depends(get_session),
     svc: TicketApplicationService = Depends(get_ticket_application_service),
 ) -> list[TicketOut]:
     if assigned_to_me:
@@ -47,25 +50,27 @@ def list_tickets(
         rows = svc.list_tickets_historical(skip=skip, limit=limit)
     else:
         rows = svc.list_tickets(skip=skip, limit=limit)
-    return [ticket_to_out(t, s) for t, s in rows]
+    return tickets_with_sla_to_out(session, rows)
 
 
 @router.get("/{ticket_id}", response_model=TicketOut)
 def get_ticket(
     ticket_id: int,
+    session: Session = Depends(get_session),
     svc: TicketApplicationService = Depends(get_ticket_application_service),
 ) -> TicketOut:
     row = svc.get_ticket(ticket_id)
     if not row:
         raise HTTPException(404, "Ticket no encontrado")
     t, sla = row
-    return ticket_to_out(t, sla)
+    return one_ticket_to_out(session, t, sla)
 
 
 @router.patch("/{ticket_id}", response_model=TicketOut)
 def patch_ticket(
     ticket_id: int,
     body: TicketUpdate,
+    session: Session = Depends(get_session),
     svc: TicketApplicationService = Depends(get_ticket_application_service),
 ) -> TicketOut:
     try:
@@ -78,13 +83,14 @@ def patch_ticket(
         )
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
-    return ticket_to_out(t, sla)
+    return one_ticket_to_out(session, t, sla)
 
 
 @router.post("/{ticket_id}/close", response_model=TicketOut)
 def close_ticket(
     ticket_id: int,
     body: TicketCloseBody,
+    session: Session = Depends(get_session),
     svc: TicketApplicationService = Depends(get_ticket_application_service),
 ) -> TicketOut:
     try:
@@ -99,65 +105,93 @@ def close_ticket(
         )
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
-    return ticket_to_out(t, sla)
 
-
-@router.delete("/{ticket_id}", status_code=204)
-def delete_ticket(
-    ticket_id: int,
-    svc: TicketApplicationService = Depends(get_ticket_application_service),
-) -> None:
-    if not svc.delete_ticket(ticket_id):
-        raise HTTPException(404, "Ticket no encontrado")
+    return one_ticket_to_out(session, t, sla)
 
 
 @router.post("/{ticket_id}/convert-type", response_model=TicketOut)
 def convert_type(
     ticket_id: int,
     body: ConvertTypeBody,
+    session: Session = Depends(get_session),
     svc: TicketApplicationService = Depends(get_ticket_application_service),
 ) -> TicketOut:
     try:
         t, sla = svc.convert_ticket_type(ticket_id, TicketType(body.ticket_type.value))
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
-    return ticket_to_out(t, sla)
+    return one_ticket_to_out(session, t, sla)
 
 
 @router.post("/{ticket_id}/escalate", response_model=TicketOut)
 def escalate(
     ticket_id: int,
-    body: EscalateBody,
+    body: EscalateHandoverBody,
+    session: Session = Depends(get_session),
+    analyst: Analyst = Depends(get_current_analyst),
     svc: TicketApplicationService = Depends(get_ticket_application_service),
 ) -> TicketOut:
+    if analyst.id is None:
+        raise HTTPException(401, "Sesión inválida")
     try:
-        t, sla = svc.escalate(ticket_id, AnalystLevel(body.target_level.value))
+        t, sla = svc.escalate_with_handover(
+            ticket_id,
+            actor_analyst_id=analyst.id,
+            target_level=AnalystLevel(body.target_level.value),
+            assignee_analyst_id=body.assignee_analyst_id,
+            handover_notes=body.handover_notes,
+            new_status=TicketStatus(body.status.value),
+        )
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
-    return ticket_to_out(t, sla)
+    return one_ticket_to_out(session, t, sla)
 
 
 @router.post("/{ticket_id}/transfer", response_model=TicketOut)
 def transfer(
     ticket_id: int,
     body: TransferBody,
+    session: Session = Depends(get_session),
     svc: TicketApplicationService = Depends(get_ticket_application_service),
 ) -> TicketOut:
     try:
         t, sla = svc.transfer_analyst(ticket_id, body.analyst_id)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
-    return ticket_to_out(t, sla)
+    return one_ticket_to_out(session, t, sla)
 
 
 @router.post("/{ticket_id}/recategorize", response_model=TicketOut)
 def recategorize(
     ticket_id: int,
     body: RecategorizeBody,
+    session: Session = Depends(get_session),
     svc: TicketApplicationService = Depends(get_ticket_application_service),
 ) -> TicketOut:
     try:
         t, sla = svc.recategorize(ticket_id, body.category_id)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
-    return ticket_to_out(t, sla)
+    return one_ticket_to_out(session, t, sla)
+
+
+@router.post("/{ticket_id}/adjust-sla", response_model=TicketOut)
+def adjust_sla(
+    ticket_id: int,
+    body: TicketAdjustSLABody,
+    analyst: Analyst = Depends(get_current_analyst),
+    session: Session = Depends(get_session),
+    svc: TicketApplicationService = Depends(get_ticket_application_service),
+) -> TicketOut:
+    """El analista asignado redefine la fecha límite del SLA (p. ej. acuerdo de extensión)."""
+    if analyst.id is None:
+        raise HTTPException(401, "Sesión inválida")
+    try:
+        t, sla = svc.adjust_sla_due_at_by_assignee(
+            ticket_id,
+            analyst.id,
+            sla_due_at=body.sla_due_at,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return one_ticket_to_out(session, t, sla)

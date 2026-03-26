@@ -28,3 +28,5 @@ class Ticket:
     metric_detected_at: datetime | None = None
     metric_first_response_at: datetime | None = None
     metric_resolution_at: datetime | None = None
+    handover_notes: str | None = None
+    user_agreement_to_close: str | None = None

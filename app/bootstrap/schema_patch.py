@@ -49,3 +49,36 @@ def apply_schema_patches() -> None:
         for name, ddl in resolution_ddl:
             if name not in t_cols:
                 conn.execute(text(f"ALTER TABLE tickets ADD COLUMN {name} {ddl}"))
+
+    insp = inspect(engine)
+    t_cols = {c["name"] for c in insp.get_columns("tickets")}
+    extra_ticket_cols = [
+        ("handover_notes", "TEXT NULL"),
+        ("user_agreement_to_close", "TEXT NULL"),
+    ]
+    with engine.begin() as conn:
+        for name, ddl in extra_ticket_cols:
+            if name not in t_cols:
+                conn.execute(text(f"ALTER TABLE tickets ADD COLUMN {name} {ddl}"))
+
+    insp = inspect(engine)
+    tables = set(insp.get_table_names())
+    if "ticket_satisfaction_surveys" not in tables:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE ticket_satisfaction_surveys (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        ticket_id INT NOT NULL,
+                        user_id INT NOT NULL,
+                        rating INT NOT NULL,
+                        comment TEXT NULL,
+                        created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+                        UNIQUE KEY uq_ticket_satisfaction_ticket (ticket_id),
+                        CONSTRAINT fk_sat_ticket FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
+                        CONSTRAINT fk_sat_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                    )
+                    """
+                )
+            )

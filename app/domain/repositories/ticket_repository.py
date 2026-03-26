@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from datetime import date
+from datetime import date, datetime
 
 from app.domain.entities.ticket import Ticket
 
@@ -39,7 +39,19 @@ class ITicketRepository(ABC):
     def delete(self, ticket_id: int) -> bool: ...
 
     @abstractmethod
+    def bulk_close_resolved_stale(self, *, resolved_before: datetime, closed_at: datetime) -> int: ...
+
+    @abstractmethod
     def count_open_on_date(self, day: date) -> int: ...
+
+    @abstractmethod
+    def count_created_on_date(self, day: date) -> int: ...
+
+    @abstractmethod
+    def count_closed_on_date(self, day: date) -> int: ...
+
+    @abstractmethod
+    def open_tickets_by_analyst(self) -> list[tuple[str, int]]: ...
 
     @abstractmethod
     def reopened_stats(self) -> tuple[int, int]: ...

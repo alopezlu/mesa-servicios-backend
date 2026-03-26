@@ -2,7 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.application.services.analytics_application_service import AnalyticsApplicationService
-from app.core.deps import get_analytics_application_service, get_current_admin, get_session
+from app.application.services.ticket_application_service import TicketApplicationService
+from app.core.deps import (
+    get_analytics_application_service,
+    get_current_admin,
+    get_session,
+    get_ticket_application_service,
+)
 from app.bootstrap.credentials import DEFAULT_ANALYST_PASSWORD
 from app.core.security import hash_password
 from app.domain.entities.admin import Admin
@@ -105,6 +111,16 @@ def patch_analyst(
         level=saved.level.value,
         is_active=saved.is_active,
     )
+
+
+@router.delete("/tickets/{ticket_id}", status_code=status.HTTP_204_NO_CONTENT)
+def admin_delete_ticket(
+    ticket_id: int,
+    svc: TicketApplicationService = Depends(get_ticket_application_service),
+) -> None:
+    """Eliminación física del caso (solo administración)."""
+    if not svc.delete_ticket(ticket_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Ticket no encontrado")
 
 
 @router.post("/analysts/{analyst_id}/password", status_code=status.HTTP_204_NO_CONTENT)

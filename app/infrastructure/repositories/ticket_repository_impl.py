@@ -1,6 +1,6 @@
 from datetime import date, datetime, time, timezone
 
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import func, literal, or_, select, text, update
 from sqlalchemy.orm import Session
 
 from app.domain.entities.enums import TicketStatus
@@ -80,8 +80,11 @@ class TicketRepositoryImpl(ITicketRepository):
         stmt = (
             select(TicketModel)
             .where(
-                TicketModel.analyst_id == analyst_id,
                 TicketModel.analyst_level == analyst_level,
+                or_(
+                    TicketModel.analyst_id == analyst_id,
+                    TicketModel.analyst_id.is_(None),
+                ),
             )
             .order_by(TicketModel.id.desc())
             .offset(skip)
@@ -115,12 +118,56 @@ class TicketRepositoryImpl(ITicketRepository):
         self._session.delete(row)
         return True
 
+    def bulk_close_resolved_stale(self, *, resolved_before: datetime, closed_at: datetime) -> int:
+        stmt = (
+            update(TicketModel)
+            .where(
+                TicketModel.status == TicketStatus.RESOLVED.value,
+                TicketModel.resolved_at.is_not(None),
+                TicketModel.resolved_at <= resolved_before,
+            )
+            .values(status=TicketStatus.CLOSED.value, closed_at=closed_at)
+        )
+        res = self._session.execute(stmt)
+        return int(res.rowcount or 0)
+
     def count_open_on_date(self, day: date) -> int:
         end = datetime.combine(day, time(23, 59, 59, tzinfo=timezone.utc))
         created_before = TicketModel.created_at <= end
         not_closed_yet = or_(TicketModel.closed_at.is_(None), TicketModel.closed_at > end)
         stmt = select(func.count()).select_from(TicketModel).where(created_before, not_closed_yet)
         return int(self._session.scalar(stmt) or 0)
+
+    def count_created_on_date(self, day: date) -> int:
+        start = datetime.combine(day, time.min, tzinfo=timezone.utc)
+        end = datetime.combine(day, time(23, 59, 59, 999999, tzinfo=timezone.utc))
+        stmt = select(func.count()).select_from(TicketModel).where(
+            TicketModel.created_at >= start,
+            TicketModel.created_at <= end,
+        )
+        return int(self._session.scalar(stmt) or 0)
+
+    def count_closed_on_date(self, day: date) -> int:
+        start = datetime.combine(day, time.min, tzinfo=timezone.utc)
+        end = datetime.combine(day, time(23, 59, 59, 999999, tzinfo=timezone.utc))
+        stmt = select(func.count()).select_from(TicketModel).where(
+            TicketModel.closed_at.is_not(None),
+            TicketModel.closed_at >= start,
+            TicketModel.closed_at <= end,
+        )
+        return int(self._session.scalar(stmt) or 0)
+
+    def open_tickets_by_analyst(self) -> list[tuple[str, int]]:
+        analyst_label = func.coalesce(AnalystModel.name, literal("Sin asignar"))
+        stmt = (
+            select(analyst_label, func.count(TicketModel.id))
+            .select_from(TicketModel)
+            .outerjoin(AnalystModel, TicketModel.analyst_id == AnalystModel.id)
+            .where(TicketModel.status != TicketStatus.CLOSED.value)
+            .group_by(analyst_label)
+            .order_by(func.count(TicketModel.id).desc())
+        )
+        return [(str(name), int(cnt)) for name, cnt in self._session.execute(stmt).all()]
 
     def reopened_stats(self) -> tuple[int, int]:
         reopened = select(func.count()).select_from(TicketModel).where(TicketModel.reopened_count > 0)
