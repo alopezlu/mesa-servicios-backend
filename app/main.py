@@ -88,4 +88,5 @@ app.include_router(api_router, prefix=settings.api_prefix)
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    """Sirve para comprobar que este proceso es la API de Mesa (no otro proyecto en el mismo puerto)."""
+    return {"status": "ok", "app": "mesa-servicios"}
